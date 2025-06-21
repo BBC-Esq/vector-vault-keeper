@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { chunkDocument, ChunkConfig } from "@/utils/documentProcessor";
-import { generateBatchEmbeddings } from "@/utils/embeddingService";
+import { EmbeddingService } from "@/utils/embeddingService"; // Changed this import
 import { FileText, Upload } from "lucide-react";
 
 interface DocumentUploadModalProps {
@@ -69,14 +68,14 @@ export function DocumentUploadModal({
       const documentId = Date.now().toString();
       
       // Step 1: Chunk the document
-      const chunks = chunkDocument(documentText, config, documentId, documentName);
+      const chunks = chunkDocument(documentText, config, documentId, documentName, 'txt'); // Added fileType parameter
       setProgress(25);
       
-      // Step 2: Generate embeddings for all chunks
+      // Step 2: Generate embeddings using the new service
+      const embeddingService = new EmbeddingService(); // Create service instance
       const chunkTexts = chunks.map(chunk => chunk.content);
-      const embeddings = await generateBatchEmbeddings(
-        chunkTexts, 
-        databaseDimensions,
+      const embeddings = await embeddingService.generateBatchEmbeddings( // Use the class method
+        chunkTexts,
         (embeddingProgress) => {
           setProgress(25 + (embeddingProgress * 75));
         }
