@@ -12,9 +12,9 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { chunkDocument, ChunkConfig } from "@/utils/documentProcessor";
+import { chunkDocument, ChunkConfig, extractTextFromFile } from "@/utils/documentProcessor";
 import { generateBatchEmbeddings } from "@/utils/embeddingService";
-import { FileText, Upload } from "lucide-react";
+import { FileText, Upload, AlertCircle } from "lucide-react";
 
 interface DocumentUploadModalProps {
   open: boolean;
@@ -35,20 +35,30 @@ export function DocumentUploadModal({
   const [chunkOverlap, setChunkOverlap] = useState(50);
   const [preserveSentences, setPreserveSentences] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState("");
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type === 'text/plain') {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
-        setDocumentText(text);
-        if (!documentName) {
-          setDocumentName(file.name.replace('.txt', ''));
-        }
-      };
-      reader.readAsText(file);
+    if (!file) return;
+
+    setIsExtracting(true);
+    setError("");
+
+    try {
+      const text = await extractTextFromFile(file);
+      setDocumentText(text);
+      if (!documentName) {
+        const name = file.name.replace(/\.(txt|pdf|docx)$/i, '');
+        setDocumentName(name);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to process file';
+      setError(errorMessage);
+      console.error('File processing error:', err);
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -58,6 +68,7 @@ export function DocumentUploadModal({
     
     setIsProcessing(true);
     setProgress(0);
+    setError("");
     
     try {
       const config: ChunkConfig = {
@@ -70,7 +81,7 @@ export function DocumentUploadModal({
       
       // Step 1: Chunk the document
       const chunks = chunkDocument(documentText, config, documentId, documentName);
-      setProgress(25);
+      setProgress(10);
       
       // Step 2: Generate embeddings for all chunks
       const chunkTexts = chunks.map(chunk => chunk.content);
@@ -78,9 +89,11 @@ export function DocumentUploadModal({
         chunkTexts, 
         databaseDimensions,
         (embeddingProgress) => {
-          setProgress(25 + (embeddingProgress * 75));
+          setProgress(10 + (embeddingProgress * 85));
         }
       );
+      
+      setProgress(95);
       
       // Step 3: Create final records
       const records = chunks.map((chunk, index) => ({
@@ -89,11 +102,13 @@ export function DocumentUploadModal({
         metadata: {
           ...chunk.metadata,
           chunkConfig: config,
-          originalDocumentLength: documentText.length
+          originalDocumentLength: documentText.length,
+          fileType: 'processed_document'
         },
         vector: embeddings[index]
       }));
       
+      setProgress(100);
       onSubmit(records);
       
       // Reset form
@@ -103,6 +118,7 @@ export function DocumentUploadModal({
       onClose();
     } catch (error) {
       console.error("Error processing document:", error);
+      setError("Failed to process document. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -120,18 +136,32 @@ export function DocumentUploadModal({
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="file-upload">Upload Text File</Label>
+              <Label htmlFor="file-upload">Upload Document</Label>
               <Input
                 id="file-upload"
                 type="file"
-                accept=".txt"
+                accept=".txt,.pdf,.docx"
                 onChange={handleFileUpload}
                 className="cursor-pointer"
+                disabled={isExtracting || isProcessing}
               />
               <p className="text-xs text-slate-500">
-                Upload a .txt file or paste text below
+                Upload a .txt, .pdf, or .docx file, or paste text below
               </p>
+              {isExtracting && (
+                <div className="flex items-center gap-2 text-sm text-blue-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  Extracting text from file...
+                </div>
+              )}
             </div>
+
+            {error && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+                <AlertCircle className="h-4 w-4" />
+                {error}
+              </div>
+            )}
             
             <div className="grid gap-2">
               <Label htmlFor="document-name">Document Name</Label>
@@ -141,6 +171,7 @@ export function DocumentUploadModal({
                 onChange={(e) => setDocumentName(e.target.value)}
                 placeholder="My Document"
                 required
+                disabled={isProcessing}
               />
             </div>
             
@@ -150,9 +181,10 @@ export function DocumentUploadModal({
                 id="document-text"
                 value={documentText}
                 onChange={(e) => setDocumentText(e.target.value)}
-                placeholder="Paste your document text here..."
+                placeholder="Paste your document text here or upload a file above..."
                 rows={6}
                 required
+                disabled={isProcessing}
               />
             </div>
             
@@ -166,6 +198,7 @@ export function DocumentUploadModal({
                   onChange={(e) => setChunkSize(Number(e.target.value))}
                   min="100"
                   max="2000"
+                  disabled={isProcessing}
                 />
               </div>
               <div className="grid gap-2">
@@ -177,6 +210,7 @@ export function DocumentUploadModal({
                   onChange={(e) => setChunkOverlap(Number(e.target.value))}
                   min="0"
                   max={Math.floor(chunkSize / 2)}
+                  disabled={isProcessing}
                 />
               </div>
             </div>
@@ -188,9 +222,10 @@ export function DocumentUploadModal({
                 checked={preserveSentences}
                 onChange={(e) => setPreserveSentences(e.target.checked)}
                 className="rounded"
+                disabled={isProcessing}
               />
               <Label htmlFor="preserve-sentences" className="text-sm">
-                Preserve sentence boundaries
+                Preserve sentence boundaries (using compromise.js)
               </Label>
             </div>
             
@@ -199,17 +234,18 @@ export function DocumentUploadModal({
                 <Label>Processing Progress</Label>
                 <Progress value={progress} className="w-full" />
                 <p className="text-xs text-slate-500">
-                  {progress < 25 ? "Chunking document..." : 
-                   progress < 100 ? "Generating embeddings..." : "Finalizing..."}
+                  {progress < 10 ? "Chunking document..." : 
+                   progress < 95 ? "Generating semantic embeddings with e5-small-v2..." : 
+                   "Finalizing..."}
                 </p>
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={isProcessing}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={isProcessing || isExtracting}>
               Cancel
             </Button>
-            <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isProcessing}>
+            <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isProcessing || isExtracting || !!error}>
               {isProcessing ? "Processing..." : "Process Document"}
             </Button>
           </DialogFooter>

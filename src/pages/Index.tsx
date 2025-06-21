@@ -5,6 +5,7 @@ import { DatabaseView } from "@/components/DatabaseView";
 import { CreateDatabaseModal } from "@/components/CreateDatabaseModal";
 import { AddRecordModal } from "@/components/AddRecordModal";
 import { DocumentUploadModal } from "@/components/DocumentUploadModal";
+import { generateEmbedding } from "@/utils/embeddingService";
 import { useToast } from "@/hooks/use-toast";
 
 // Cosine similarity function
@@ -184,7 +185,7 @@ const Index = () => {
     });
   };
 
-  const handleSearch = (query: string) => {
+  const handleSearch = async (query: string) => {
     setSearchQuery(query);
     
     if (!query.trim() || !selectedDatabase) {
@@ -195,21 +196,35 @@ const Index = () => {
     const currentDb = getCurrentDatabase();
     if (!currentDb) return;
 
-    const queryVector = textToVector(query, currentDb.dimensions);
-    
-    const results = currentDb.records
-      .map(record => ({
-        ...record,
-        similarity: cosineSimilarity(queryVector, record.vector)
-      }))
-      .filter(record => 
-        record.similarity > 0.1 ||
-        record.content.toLowerCase().includes(query.toLowerCase()) ||
-        JSON.stringify(record.metadata).toLowerCase().includes(query.toLowerCase())
-      )
-      .sort((a, b) => b.similarity - a.similarity);
+    try {
+      // Generate embedding for search query using the same model
+      const queryVector = await generateEmbedding(query, currentDb.dimensions);
+      
+      const results = currentDb.records
+        .map(record => ({
+          ...record,
+          similarity: cosineSimilarity(queryVector, record.vector)
+        }))
+        .filter(record => 
+          record.similarity > 0.1 ||
+          record.content.toLowerCase().includes(query.toLowerCase()) ||
+          JSON.stringify(record.metadata).toLowerCase().includes(query.toLowerCase())
+        )
+        .sort((a, b) => b.similarity - a.similarity);
 
-    setSearchResults(results);
+      setSearchResults(results);
+    } catch (error) {
+      console.error('Search error:', error);
+      // Fallback to text-based search
+      const results = currentDb.records
+        .filter(record => 
+          record.content.toLowerCase().includes(query.toLowerCase()) ||
+          JSON.stringify(record.metadata).toLowerCase().includes(query.toLowerCase())
+        )
+        .map(record => ({ ...record, similarity: 0.5 }));
+      
+      setSearchResults(results);
+    }
   };
 
   const currentDatabase = getCurrentDatabase();

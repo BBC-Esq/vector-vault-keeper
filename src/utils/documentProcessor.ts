@@ -1,4 +1,8 @@
 
+import compromise from 'compromise';
+import * as pdfjsLib from 'pdf-parse';
+import mammoth from 'mammoth';
+
 export interface ChunkConfig {
   chunkSize: number;
   chunkOverlap: number;
@@ -18,9 +22,68 @@ export interface DocumentChunk {
   };
 }
 
-// Simple sentence splitter - in production, you'd use a proper NLP library
+// Enhanced sentence splitting using compromise
 const splitIntoSentences = (text: string): string[] => {
-  return text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim() + '.');
+  try {
+    const doc = compromise(text);
+    const sentences = doc.sentences().out('array');
+    return sentences.filter(s => s.trim().length > 0);
+  } catch (error) {
+    console.warn('Compromise failed, falling back to simple splitting:', error);
+    // Fallback to simple sentence splitting
+    return text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim() + '.');
+  }
+};
+
+// Extract text from PDF file
+const extractTextFromPDF = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  
+  try {
+    const pdf = await pdfjsLib(uint8Array);
+    return pdf.text;
+  } catch (error) {
+    console.error('Error extracting PDF text:', error);
+    throw new Error('Failed to extract text from PDF file');
+  }
+};
+
+// Extract text from DOCX file
+const extractTextFromDOCX = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  
+  try {
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  } catch (error) {
+    console.error('Error extracting DOCX text:', error);
+    throw new Error('Failed to extract text from DOCX file');
+  }
+};
+
+// Extract text from uploaded file
+export const extractTextFromFile = async (file: File): Promise<string> => {
+  const fileType = file.type.toLowerCase();
+  const fileName = file.name.toLowerCase();
+  
+  if (fileType === 'text/plain' || fileName.endsWith('.txt')) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  } else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+    return extractTextFromPDF(file);
+  } else if (
+    fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    fileName.endsWith('.docx')
+  ) {
+    return extractTextFromDOCX(file);
+  } else {
+    throw new Error('Unsupported file type. Please upload a .txt, .pdf, or .docx file.');
+  }
 };
 
 export const chunkDocument = (
@@ -52,7 +115,7 @@ export const chunkDocument = (
             chunkIndex,
             startPosition,
             endPosition: startPosition + currentChunk.length,
-            totalChunks: 0 // Will be updated later
+            totalChunks: 0
           }
         };
         chunks.push(chunk);
@@ -78,7 +141,7 @@ export const chunkDocument = (
           chunkIndex,
           startPosition,
           endPosition: startPosition + currentChunk.length,
-          totalChunks: 0 // Will be updated later
+          totalChunks: 0
         }
       };
       chunks.push(chunk);
@@ -101,12 +164,11 @@ export const chunkDocument = (
           chunkIndex,
           startPosition: position,
           endPosition,
-          totalChunks: 0 // Will be updated later
+          totalChunks: 0
         }
       };
       chunks.push(chunk);
       
-      // Move position with overlap consideration
       position = endPosition - config.chunkOverlap;
       chunkIndex++;
     }
