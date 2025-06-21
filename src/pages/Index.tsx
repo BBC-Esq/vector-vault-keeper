@@ -1,32 +1,12 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Dashboard } from "@/components/Dashboard";
 import { DatabaseView } from "@/components/DatabaseView";
 import { CreateDatabaseModal } from "@/components/CreateDatabaseModal";
 import { AddRecordModal } from "@/components/AddRecordModal";
 import { DocumentUploadModal } from "@/components/DocumentUploadModal";
-import { generateEmbedding } from "@/utils/embeddingService";
 import { useToast } from "@/hooks/use-toast";
-
-// Cosine similarity function
-const cosineSimilarity = (a: number[], b: number[]): number => {
-  const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
-  const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-  const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-  return dotProduct / (magnitudeA * magnitudeB);
-};
-
-// Simple text to vector conversion (for demo purposes)
-const textToVector = (text: string, dimensions: number): number[] => {
-  const hash = text.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0);
-    return a & a;
-  }, 0);
-  
-  return Array.from({ length: dimensions }, (_, i) => 
-    Math.sin(hash + i) * 0.5
-  );
-};
+import { EmbeddingService } from "@/utils/embeddingService";
 
 const Index = () => {
   const [databases, setDatabases] = useState([
@@ -60,8 +40,32 @@ const Index = () => {
   const [editRecord, setEditRecord] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  
+  // Keep a reference to the embedding service to avoid recreating it
+  const embeddingServiceRef = useRef<EmbeddingService | null>(null);
   
   const { toast } = useToast();
+
+  // Get or create embedding service
+  const getEmbeddingService = () => {
+    if (!embeddingServiceRef.current) {
+      embeddingServiceRef.current = new EmbeddingService();
+    }
+    return embeddingServiceRef.current;
+  };
+
+  // Fallback simple vector generation for demo/testing
+  const simpleTextToVector = (text: string, dimensions: number): number[] => {
+    const hash = text.split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    
+    return Array.from({ length: dimensions }, (_, i) => 
+      Math.sin(hash + i) * 0.5
+    );
+  };
 
   const handleCreateDatabase = (data: { name: string; description: string; dimensions: number }) => {
     const newDatabase = {
@@ -196,14 +200,33 @@ const Index = () => {
     const currentDb = getCurrentDatabase();
     if (!currentDb) return;
 
+    setIsSearching(true);
+
     try {
-      // Generate embedding for search query using the same model
-      const queryVector = await generateEmbedding(query, currentDb.dimensions);
+      let queryVector: number[];
+      
+      // Try to use the embedding service, fall back to simple method if it fails
+      try {
+        const embeddingService = getEmbeddingService();
+        queryVector = await embeddingService.generateEmbedding(query);
+        
+        // If dimensions don't match, pad or truncate
+        if (queryVector.length !== currentDb.dimensions) {
+          if (queryVector.length > currentDb.dimensions) {
+            queryVector = queryVector.slice(0, currentDb.dimensions);
+          } else {
+            queryVector = [...queryVector, ...Array(currentDb.dimensions - queryVector.length).fill(0)];
+          }
+        }
+      } catch (error) {
+        console.warn("Embedding service failed, using fallback:", error);
+        queryVector = simpleTextToVector(query, currentDb.dimensions);
+      }
       
       const results = currentDb.records
         .map(record => ({
           ...record,
-          similarity: cosineSimilarity(queryVector, record.vector)
+          similarity: EmbeddingService.cosineSimilarity(queryVector, record.vector)
         }))
         .filter(record => 
           record.similarity > 0.1 ||
@@ -214,16 +237,14 @@ const Index = () => {
 
       setSearchResults(results);
     } catch (error) {
-      console.error('Search error:', error);
-      // Fallback to text-based search
-      const results = currentDb.records
-        .filter(record => 
-          record.content.toLowerCase().includes(query.toLowerCase()) ||
-          JSON.stringify(record.metadata).toLowerCase().includes(query.toLowerCase())
-        )
-        .map(record => ({ ...record, similarity: 0.5 }));
-      
-      setSearchResults(results);
+      console.error("Search failed:", error);
+      toast({
+        title: "Search failed",
+        description: "An error occurred while searching. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -260,6 +281,7 @@ const Index = () => {
             searchQuery={searchQuery}
             onSearchChange={handleSearch}
             searchResults={searchResults}
+            isSearching={isSearching}
           />
         )}
 
