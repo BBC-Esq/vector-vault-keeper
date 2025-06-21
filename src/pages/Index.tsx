@@ -1,10 +1,10 @@
-
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Dashboard } from "@/components/Dashboard";
 import { DatabaseView } from "@/components/DatabaseView";
 import { CreateDatabaseModal } from "@/components/CreateDatabaseModal";
 import { AddRecordModal } from "@/components/AddRecordModal";
+import { DocumentUploadModal } from "@/components/DocumentUploadModal";
 import { useToast } from "@/hooks/use-toast";
 
 // Cosine similarity function
@@ -55,6 +55,7 @@ const Index = () => {
   const [selectedDatabase, setSelectedDatabase] = useState<string>();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddRecordModal, setShowAddRecordModal] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [editRecord, setEditRecord] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -120,6 +121,21 @@ const Index = () => {
     });
   };
 
+  const handleProcessDocument = (chunks: any[]) => {
+    if (!selectedDatabase) return;
+
+    setDatabases(prev => prev.map(db => 
+      db.id === selectedDatabase 
+        ? { ...db, records: [...db.records, ...chunks] }
+        : db
+    ));
+
+    toast({
+      title: "Document processed",
+      description: `${chunks.length} chunks have been added to the database.`,
+    });
+  };
+
   const handleEditRecord = (record: any) => {
     setEditRecord(record);
     setShowAddRecordModal(true);
@@ -179,17 +195,15 @@ const Index = () => {
     const currentDb = getCurrentDatabase();
     if (!currentDb) return;
 
-    // Convert search query to vector
     const queryVector = textToVector(query, currentDb.dimensions);
     
-    // Calculate similarities and sort by relevance
     const results = currentDb.records
       .map(record => ({
         ...record,
         similarity: cosineSimilarity(queryVector, record.vector)
       }))
       .filter(record => 
-        record.similarity > 0.1 || // Similarity threshold
+        record.similarity > 0.1 ||
         record.content.toLowerCase().includes(query.toLowerCase()) ||
         JSON.stringify(record.metadata).toLowerCase().includes(query.toLowerCase())
       )
@@ -225,6 +239,7 @@ const Index = () => {
             database={currentDatabase}
             onBack={() => setActiveView('dashboard')}
             onAddRecord={() => setShowAddRecordModal(true)}
+            onProcessDocument={() => setShowDocumentModal(true)}
             onDeleteRecord={handleDeleteRecord}
             onEditRecord={handleEditRecord}
             searchQuery={searchQuery}
@@ -269,6 +284,13 @@ const Index = () => {
         onSubmit={editRecord ? handleUpdateRecord : handleAddRecord}
         databaseDimensions={currentDatabase?.dimensions || 384}
         editRecord={editRecord}
+      />
+
+      <DocumentUploadModal
+        open={showDocumentModal}
+        onClose={() => setShowDocumentModal(false)}
+        onSubmit={handleProcessDocument}
+        databaseDimensions={currentDatabase?.dimensions || 384}
       />
     </div>
   );
