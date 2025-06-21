@@ -1,4 +1,4 @@
-import { ArrowLeft, Plus, Search, Trash2, Edit, FileText } from "lucide-react";
+import { ArrowLeft, Plus, Search, Trash2, Edit, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,7 @@ interface DatabaseViewProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   searchResults: any[];
+  isSearching?: boolean; // Added this prop
 }
 
 export function DatabaseView({
@@ -26,7 +27,8 @@ export function DatabaseView({
   onEditRecord,
   searchQuery,
   onSearchChange,
-  searchResults
+  searchResults,
+  isSearching = false // Added with default value
 }: DatabaseViewProps) {
   const [activeTab, setActiveTab] = useState<'records' | 'search'>('records');
 
@@ -136,17 +138,28 @@ export function DatabaseView({
       {activeTab === 'search' && (
         <div className="mb-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+            {isSearching ? (
+              <Loader2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+            )}
             <Input
               placeholder="Search vectors by content or metadata..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               className="pl-10"
+              disabled={isSearching}
             />
           </div>
-          {searchQuery && (
+          {searchQuery && !isSearching && (
             <p className="text-sm text-slate-600 mt-2">
               Found {searchResults.length} results for "{searchQuery}"
+            </p>
+          )}
+          {isSearching && (
+            <p className="text-sm text-slate-600 mt-2 flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Searching with AI embeddings...
             </p>
           )}
         </div>
@@ -169,55 +182,72 @@ export function DatabaseView({
       </div>
 
       <div className="grid gap-4">
-        {Object.entries(groupedRecords).map(([docId, records]: [string, any]) => {
-          if (docId === 'single_records') {
-            return (records as any[]).map(renderRecord);
-          } else {
-            const docName = (records as any[])[0]?.metadata?.documentName || 'Unknown Document';
-            return (
-              <div key={docId} className="border rounded-lg p-4 bg-slate-50">
-                <div className="flex items-center gap-2 mb-3">
-                  <FileText className="h-4 w-4 text-slate-600" />
-                  <h3 className="font-medium text-slate-800">{docName}</h3>
-                  <Badge variant="outline" className="text-xs">
-                    {(records as any[]).length} chunks
-                  </Badge>
-                </div>
-                <div className="grid gap-3">
-                  {(records as any[]).map(renderRecord)}
-                </div>
-              </div>
-            );
-          }
-        })}
-
-        {displayRecords.length === 0 && (
+        {/* Show loading placeholder when searching */}
+        {isSearching && activeTab === 'search' ? (
           <Card className="border-dashed border-2 border-slate-300">
             <CardContent className="flex flex-col items-center justify-center py-12">
-              <Search className="h-12 w-12 text-slate-400 mb-4" />
+              <Loader2 className="h-12 w-12 text-slate-400 mb-4 animate-spin" />
               <h3 className="text-lg font-medium text-slate-600 mb-2">
-                {activeTab === 'search' ? 'No search results' : 'No records yet'}
+                Searching...
               </h3>
-              <p className="text-slate-500 mb-4">
-                {activeTab === 'search' 
-                  ? 'Try a different search query' 
-                  : 'Add vector records or process a document to get started'
-                }
+              <p className="text-slate-500">
+                Generating embeddings and finding similar content
               </p>
-              {activeTab === 'records' && (
-                <div className="flex gap-2">
-                  <Button onClick={onProcessDocument} variant="outline">
-                    <FileText className="h-4 w-4 mr-2" />
-                    Process Document
-                  </Button>
-                  <Button onClick={onAddRecord} className="bg-blue-600 hover:bg-blue-700">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Record
-                  </Button>
-                </div>
-              )}
             </CardContent>
           </Card>
+        ) : (
+          <>
+            {Object.entries(groupedRecords).map(([docId, records]: [string, any]) => {
+              if (docId === 'single_records') {
+                return (records as any[]).map(renderRecord);
+              } else {
+                const docName = (records as any[])[0]?.metadata?.documentName || 'Unknown Document';
+                return (
+                  <div key={docId} className="border rounded-lg p-4 bg-slate-50">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText className="h-4 w-4 text-slate-600" />
+                      <h3 className="font-medium text-slate-800">{docName}</h3>
+                      <Badge variant="outline" className="text-xs">
+                        {(records as any[]).length} chunks
+                      </Badge>
+                    </div>
+                    <div className="grid gap-3">
+                      {(records as any[]).map(renderRecord)}
+                    </div>
+                  </div>
+                );
+              }
+            })}
+
+            {displayRecords.length === 0 && !isSearching && (
+              <Card className="border-dashed border-2 border-slate-300">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <Search className="h-12 w-12 text-slate-400 mb-4" />
+                  <h3 className="text-lg font-medium text-slate-600 mb-2">
+                    {activeTab === 'search' ? 'No search results' : 'No records yet'}
+                  </h3>
+                  <p className="text-slate-500 mb-4">
+                    {activeTab === 'search' 
+                      ? 'Try a different search query' 
+                      : 'Add vector records or process a document to get started'
+                    }
+                  </p>
+                  {activeTab === 'records' && (
+                    <div className="flex gap-2">
+                      <Button onClick={onProcessDocument} variant="outline">
+                        <FileText className="h-4 w-4 mr-2" />
+                        Process Document
+                      </Button>
+                      <Button onClick={onAddRecord} className="bg-blue-600 hover:bg-blue-700">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Record
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </>
         )}
       </div>
     </div>
